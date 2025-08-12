@@ -1,0 +1,17 @@
+policy_name: "default"
+version: "1.0"
+description: "Default QoS policy for network anomaly response"
+created_at: "2024-01-01T00:00:00Z"
+updated_at: "2024-01-01T00:00:00Z"
+
+thresholds:
+  prioritize_threshold: 0.9    # High confidence anomalies get prioritized
+  rate_limit_threshold: 0.7    # Medium-high confidence anomalies get rate limited
+  drop_threshold: 0.5          # Medium confidence anomalies become drop candidates
+  inspect_threshold: 0.3       # Low-medium confidence anomalies get inspected
+
+enabled_actions:
+  - "PRIORITIZE"
+  - "RATE_LIMIT"
+  - "INSPECT"
+  # - "DROP_CANDIDATE"  # Disabled by default for safety
