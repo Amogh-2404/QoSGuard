@@ -8,7 +8,7 @@ import sys
 import pickle
 import joblib
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List
 import argparse
 from datetime import datetime
 
