@@ -21,10 +21,18 @@ interface PredictionResult {
 }
 
 export default function Dashboard() {
-  const [metrics, setMetrics] = useState<MetricCard[]>([
+  // Dynamic metrics based on dashboard stats
+  const [dashboardStats, setDashboardStats] = useState({
+    totalPredictions: 12847,
+    anomaliesDetected: 1923,
+    normalFlows: 10924,
+    avgResponseTime: 127
+  })
+
+  const metrics = [
     {
       title: 'Total Predictions',
-      value: '12,847',
+      value: dashboardStats.totalPredictions.toLocaleString(),
       change: '+12%',
       changeType: 'increase',
       icon: ChartBarIcon,
@@ -32,7 +40,7 @@ export default function Dashboard() {
     },
     {
       title: 'Anomalies Detected',
-      value: '1,923',
+      value: dashboardStats.anomaliesDetected.toLocaleString(),
       change: '+8%',
       changeType: 'increase',
       icon: ExclamationTriangleIcon,
@@ -40,7 +48,7 @@ export default function Dashboard() {
     },
     {
       title: 'Normal Flows',
-      value: '10,924',
+      value: dashboardStats.normalFlows.toLocaleString(),
       change: '+4%',
       changeType: 'increase',
       icon: ShieldCheckIcon,
@@ -48,32 +56,19 @@ export default function Dashboard() {
     },
     {
       title: 'Avg Response Time',
-      value: '127ms',
+      value: `${dashboardStats.avgResponseTime}ms`,
       change: '-3ms',
       changeType: 'decrease',
       icon: ClockIcon,
       color: 'yellow'
     }
-  ])
+  ]
 
-  const [recentPredictions, setRecentPredictions] = useState<PredictionResult[]>([
-    {
-      flow_id: 'flow-001',
-      is_anomaly: true,
-      anomaly_score: 0.85,
-      qos_recommendation: 'RATE_LIMIT',
-      processing_time_ms: 142,
-      timestamp: new Date().toISOString()
-    },
-    {
-      flow_id: 'flow-002',
-      is_anomaly: false,
-      anomaly_score: 0.23,
-      qos_recommendation: 'INSPECT',
-      processing_time_ms: 98,
-      timestamp: new Date(Date.now() - 30000).toISOString()
-    }
-  ])
+  const [mounted, setMounted] = useState(false)
+  const [recentPredictions, setRecentPredictions] = useState<any[]>([])
+  const [testResult, setTestResult] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
 
   const [systemStatus, setSystemStatus] = useState({
     api: 'healthy',
@@ -82,10 +77,32 @@ export default function Dashboard() {
   })
 
   useEffect(() => {
+    setMounted(true)
+    
+    // Initialize sample data after mount to avoid hydration mismatch
+    setRecentPredictions([
+      {
+        flow_id: 'flow-001',
+        is_anomaly: true,
+        anomaly_score: 0.85,
+        qos_recommendation: 'RATE_LIMIT',
+        processing_time_ms: 142,
+        timestamp: new Date().toISOString()
+      },
+      {
+        flow_id: 'flow-002',
+        is_anomaly: false,
+        anomaly_score: 0.23,
+        qos_recommendation: 'INSPECT',
+        processing_time_ms: 98,
+        timestamp: new Date(Date.now() - 30000).toISOString()
+      }
+    ])
+
     // Check API health
     const checkHealth = async () => {
       try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/healthz`)
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/healthz`)
         if (response.ok) {
           setSystemStatus(prev => ({ ...prev, api: 'healthy' }))
         } else {
@@ -96,11 +113,156 @@ export default function Dashboard() {
       }
     }
 
+    // Initial fetch of dashboard stats and health check
     checkHealth()
-    const interval = setInterval(checkHealth, 30000) // Check every 30 seconds
+    fetchDashboardStats()
+    
+    // Set up periodic updates
+    const healthInterval = setInterval(checkHealth, 30000) // Check every 30 seconds
+    const statsInterval = setInterval(fetchDashboardStats, 60000) // Update stats every minute
 
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(healthInterval)
+      clearInterval(statsInterval)
+    }
   }, [])
+
+  // Function to fetch dashboard stats from backend
+  const fetchDashboardStats = async () => {
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/stats`)
+      if (response.ok) {
+        const stats = await response.json()
+        setDashboardStats({
+          totalPredictions: stats.total_predictions || dashboardStats.totalPredictions,
+          anomaliesDetected: stats.anomalies_detected || dashboardStats.anomaliesDetected,
+          normalFlows: stats.normal_flows || dashboardStats.normalFlows,
+          avgResponseTime: stats.avg_response_time || dashboardStats.avgResponseTime
+        })
+      }
+    } catch (error) {
+      console.log('Stats API not available, using local stats')
+    }
+  }
+
+  // Function to update dashboard stats based on predictions
+  const updateDashboardStats = (predictions: any[]) => {
+    const newAnomalies = predictions.filter(p => p.is_anomaly).length
+    const total = dashboardStats.totalPredictions + predictions.length
+    const anomalies = dashboardStats.anomaliesDetected + newAnomalies
+    const normal = total - anomalies
+    const avgTime = predictions.length > 0 
+      ? Math.round(predictions.reduce((sum, p) => sum + (p.processing_time_ms || 0), dashboardStats.avgResponseTime * 2) / (predictions.length + 2))
+      : dashboardStats.avgResponseTime
+    
+    setDashboardStats({
+      totalPredictions: total,
+      anomaliesDetected: anomalies,
+      normalFlows: normal,
+      avgResponseTime: avgTime
+    })
+  }
+
+  // Show notification function
+  const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setNotification({ message, type })
+    setTimeout(() => setNotification(null), 4000) // Show for 4 seconds
+  }
+
+  // Button click handlers
+  const handleSendTestFlow = async () => {
+    setLoading(true)
+    try {
+      const testFlow = {
+        flow_id: `test-${Date.now()}`,
+        features: {
+          dur: 10.5, proto: 'tcp', service: 'http', state: 'FIN',
+          spkts: 100, dpkts: 95, sbytes: 50000, dbytes: 48000,
+          rate: 15.2, sttl: 64, dttl: 64, sload: 4000.0, dload: 3800.0,
+          sloss: 0, dloss: 0, swin: 8192, dwin: 8192, stcpb: 123456,
+          dtcpb: 789012, smeansz: 500.0, dmeansz: 505.3, trans_depth: 1,
+          res_bdy_len: 1024, sjit: 0.01, djit: 0.01, sintpkt: 0.1,
+          dintpkt: 0.1, tcprtt: 0.05, synack: 0.01, ackdat: 0.005
+        }
+      }
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/predict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(testFlow)
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        setTestResult(result)
+        // Add to recent predictions
+        const newPrediction = {
+          flow_id: result.flow_id,
+          is_anomaly: result.is_anomaly,
+          anomaly_score: result.anomaly_score,
+          qos_recommendation: result.qos_recommendation,
+          processing_time_ms: result.processing_time_ms,
+          timestamp: new Date().toISOString()
+        }
+        const updatedPredictions = [newPrediction, ...recentPredictions.slice(0, 9)]
+        setRecentPredictions(updatedPredictions)
+        updateDashboardStats(updatedPredictions)
+        showNotification(`Test Result: ${result.is_anomaly ? 'ANOMALY' : 'NORMAL'} (Score: ${result.anomaly_score?.toFixed(3)}, Action: ${result.qos_recommendation})`, 'success')
+      } else {
+        showNotification('Error: Failed to get prediction', 'error')
+      }
+    } catch (error) {
+      showNotification('Error: Cannot connect to API', 'error')
+    }
+    setLoading(false)
+  }
+
+  const handleUpdatePolicy = async () => {
+    const newThreshold = prompt('Enter new anomaly detection threshold (0.0-1.0):', '0.7')
+    if (newThreshold && !isNaN(Number(newThreshold))) {
+      try {
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/policy`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            policy_name: "default",
+            thresholds: {
+              rate_limit_threshold: Number(newThreshold),
+              prioritize_threshold: 0.9,
+              drop_threshold: 0.5,
+              inspect_threshold: 0.3
+            },
+            description: "Updated QoS policy via dashboard"
+          })
+        })
+        
+        if (response.ok) {
+          showNotification(`Policy updated! Rate limit threshold set to ${newThreshold}`, 'success')
+        } else {
+          const error = await response.text()
+          showNotification(`Error: Failed to update policy - ${error}`, 'error')
+        }
+      } catch (error) {
+        showNotification('Error: Cannot connect to API', 'error')
+      }
+    }
+  }
+
+  const handleViewSHAP = async () => {
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/v1/models`)
+      if (response.ok) {
+        const data = await response.json()
+        const modelsInfo = data.models || {}
+        const totalModels = data.total_models || 0
+        showNotification(`SHAP Models Available: ${totalModels} models loaded. Registry: ${data.registry_path || 'Not configured'}`, 'info')
+      } else {
+        showNotification('Error: Failed to get SHAP data', 'error')
+      }
+    } catch (error) {
+      showNotification('Error: Cannot connect to API', 'error')
+    }
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -254,8 +416,12 @@ export default function Dashboard() {
             <div className="bg-white overflow-hidden shadow rounded-lg">
               <div className="p-6">
                 <h3 className="text-lg font-medium text-gray-900 mb-4">Test Prediction</h3>
-                <button className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition duration-150 ease-in-out">
-                  Send Test Flow
+                <button 
+                  onClick={handleSendTestFlow}
+                  disabled={loading}
+                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium py-2 px-4 rounded-md transition duration-150 ease-in-out"
+                >
+                  {loading ? 'Testing...' : 'Send Test Flow'}
                 </button>
               </div>
             </div>
@@ -263,7 +429,10 @@ export default function Dashboard() {
             <div className="bg-white overflow-hidden shadow rounded-lg">
               <div className="p-6">
                 <h3 className="text-lg font-medium text-gray-900 mb-4">Policy Management</h3>
-                <button className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md transition duration-150 ease-in-out">
+                <button 
+                  onClick={handleUpdatePolicy}
+                  className="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-4 rounded-md transition duration-150 ease-in-out"
+                >
                   Update Policy
                 </button>
               </div>
@@ -272,12 +441,51 @@ export default function Dashboard() {
             <div className="bg-white overflow-hidden shadow rounded-lg">
               <div className="p-6">
                 <h3 className="text-lg font-medium text-gray-900 mb-4">Model Insights</h3>
-                <button className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-md transition duration-150 ease-in-out">
+                <button 
+                  onClick={handleViewSHAP}
+                  className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 px-4 rounded-md transition duration-150 ease-in-out"
+                >
                   View SHAP
                 </button>
               </div>
             </div>
           </div>
+
+          {/* Notification Component */}
+          {notification && (
+            <div className={`fixed top-4 right-4 max-w-sm w-full bg-white border-l-4 p-4 shadow-lg rounded-md z-50 ${
+              notification.type === 'success' ? 'border-green-500' : 
+              notification.type === 'error' ? 'border-red-500' : 'border-blue-500'
+            }`}>
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  {notification.type === 'success' && (
+                    <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                  {notification.type === 'error' && (
+                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                  {notification.type === 'info' && (
+                    <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                </div>
+                <div className="ml-3">
+                  <p className={`text-sm font-medium ${
+                    notification.type === 'success' ? 'text-green-800' : 
+                    notification.type === 'error' ? 'text-red-800' : 'text-blue-800'
+                  }`}>
+                    {notification.message}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>
