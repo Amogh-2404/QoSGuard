@@ -87,6 +87,7 @@ class ModelRegistry:
         self.explainers: Dict[str, shap.Explainer] = {}
         self.feature_names: List[str] = []
         self._loaded = False
+        self.model_files_found = False
         
     async def load_models(self) -> None:
         """Load all trained models from registry."""
@@ -106,9 +107,14 @@ class ModelRegistry:
                 'pytorch_mlp': registry_path / 'pytorch_mlp.pth'
             }
             
+            models_loaded_count = 0
             for model_name, model_file in model_files.items():
                 if model_file.exists():
                     await self._load_model(model_name, model_file)
+                    models_loaded_count += 1
+            
+            # Only set model_files_found to True if at least one real model was loaded
+            self.model_files_found = models_loaded_count > 0
             
             # Load preprocessing components
             scaler_file = registry_path / 'scaler.pkl'
@@ -201,8 +207,8 @@ class ModelRegistry:
             logger.error("Failed to create SHAP explainers", error=str(e))
     
     def is_loaded(self) -> bool:
-        """Check if models are loaded."""
-        return self._loaded
+        """Check if actual trained models are loaded (not dummy models)."""
+        return self._loaded and len(self.models) > 0 and hasattr(self, 'model_files_found') and self.model_files_found
     
     async def predict(self, features: FlowFeatures, model_name: Optional[str] = None) -> ModelPredictionResult:
         """Make prediction using specified model or ensemble."""

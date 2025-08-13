@@ -7,7 +7,7 @@ from typing import Dict, List, Any, Union
 import time
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
 from fastapi.responses import StreamingResponse
 from prometheus_client import Counter, Histogram, Gauge
 import structlog
@@ -38,10 +38,9 @@ router = APIRouter()
 settings = get_settings()
 
 
-async def get_model_registry() -> ModelRegistry:
-    """Dependency to get model registry."""
-    # This would be injected from app state in a real setup
-    return ModelRegistry()
+async def get_model_registry(request: Request) -> ModelRegistry:
+    """Dependency to get model registry from app state."""
+    return request.app.state.model_registry
 
 
 async def get_qos_engine() -> QoSRecommendationEngine:
